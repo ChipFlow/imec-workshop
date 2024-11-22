@@ -1,0 +1,40 @@
+[chipflow]
+project_id = 13
+
+[chipflow.steps]
+board = "uart_demo.steps.board:GlasgowBoardStep"
+
+[chipflow.silicon]
+process  = "ihp_sg13g2"
+pad_ring = "pga144"
+
+[chipflow.silicon.pads]
+
+# UART 0
+uart0_rx = {type = "i", loc = "78" }
+uart0_tx = {type = "o", loc = "79" }
+
+# System
+sys_clk   = { type = "clk", loc = "114" }
+sys_rst_n = { type = "i",   loc = "115" }
+heartbeat = { type = "o",   loc = "118" }
+
+[chipflow.silicon.power]
+dvss0 = { loc =   "1" }
+dvdd0 = { loc =   "9" }
+vss0  = { loc =  "17" }
+vdd0  = { loc =  "25" }
+dvss1 = { loc =  "33" }
+dvdd1 = { loc =  "41" }
+vss1  = { loc =  "49" }
+vdd1  = { loc =  "57" }
+dvss2 = { loc =  "65" }
+dvdd2 = { loc =  "73" }
+vss2  = { loc =  "81" }
+vdd2  = { loc =  "89" }
+dvss3 = { loc =  "97" }
+dvdd3 = { loc = "105" }
+vss3  = { loc = "113" }
+vdd3  = { loc = "121" }
+dvss4 = { loc = "129" }
+dvdd4 = { loc = "137" }
