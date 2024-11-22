@@ -5,7 +5,7 @@
 groups = ["default", "test"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:f65b59fb128e93905ce772bf89ccbc8d2930ea78214c46c31f300fa5088cd666"
+content_hash = "sha256:79b3c181a05cbf9a9f9c11cfeef7f3e237b18ae4085b9b51e4d92b537a1b715d"
 
 [[metadata.targets]]
 requires_python = ">3.10.0,<3.10.1||>3.10.1,<3.10.2||>3.10.2,<4.0"
@@ -303,7 +303,7 @@ files = [
 
 [[package]]
 name = "glasgow"
-version = "0.1.dev2225"
+version = "0.1.dev2225+g490480f"
 requires_python = "!=3.10.0,!=3.10.1,!=3.10.2,~=3.9"
 subdirectory = "software"
 git = "https://github.com/GlasgowEmbedded/glasgow"
@@ -318,6 +318,24 @@ dependencies = [
     "platformdirs<5,>=3.0.0",
     "pyvcd<0.5,>=0.2",
     "typing-extensions<5,>=4.8",
+]
+
+[[package]]
+name = "glasgow"
+version = "0.1.dev2225"
+extras = ["builtin-toolchain"]
+requires_python = "!=3.10.0,!=3.10.1,!=3.10.2,~=3.9"
+subdirectory = "software"
+git = "https://github.com/GlasgowEmbedded/glasgow"
+revision = "490480fa696039d7f9534100a1b715b71566e0ec"
+summary = "Software for the Glasgow Interface Explorer, a digital interface multitool"
+groups = ["default"]
+dependencies = [
+    "amaranth-yosys",
+    "glasgow @ git+https://github.com/GlasgowEmbedded/glasgow#subdirectory=software",
+    "yowasp-nextpnr-ice40>=0.1",
+    "yowasp-runtime>=1.42",
+    "yowasp-yosys>=0.31.0.13",
 ]
 
 [[package]]
@@ -770,6 +788,18 @@ dependencies = [
 ]
 files = [
     {file = "yowasp_nextpnr_ecp5-0.7.0.0.post519-py3-none-any.whl", hash = "sha256:0bab40d519525d17bf1b3e5961da1a23594594c2c3b25d404d3d7f95aebbeeef"},
+]
+
+[[package]]
+name = "yowasp-nextpnr-ice40"
+version = "0.7.0.0.post519"
+summary = "nextpnr-ice40 FPGA place and route tool"
+groups = ["default"]
+dependencies = [
+    "yowasp-runtime~=1.1",
+]
+files = [
+    {file = "yowasp_nextpnr_ice40-0.7.0.0.post519-py3-none-any.whl", hash = "sha256:abd245a20de0517526be670f78e645a7d0aff56165a674a501c39e69a2f102b3"},
 ]
 
 [[package]]
