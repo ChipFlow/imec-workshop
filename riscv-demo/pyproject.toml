@@ -32,3 +32,5 @@ test = [
 [tool.pdm.scripts]
 _.env_file = ".env.toolchain"
 test.cmd = "pytest"
+pre_install = "git config --global core.longpaths true"
+
