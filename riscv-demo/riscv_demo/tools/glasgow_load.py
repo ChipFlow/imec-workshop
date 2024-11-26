@@ -13,6 +13,8 @@ async def download_bitstream(self, bitstream, bitstream_id=b"\xff" * 16):
             await self.control_write(usb1.REQUEST_TYPE_VENDOR, REQ_FPGA_CFG,
                                      0, index, bitstream[index * 1024:(index + 1) * 1024])
             index += 1
+        # Make sure IO voltage is set _before_ FPGA comes up
+        await self.set_voltage("AB", 3.3)
         # Complete configuration by setting bitstream ID. This starts the FPGA.
         try:
             await self.control_write(usb1.REQUEST_TYPE_VENDOR, REQ_BITSTREAM_ID,
@@ -29,7 +31,6 @@ def main():
     async def do_program():
         device = GlasgowHardwareDevice()
         await download_bitstream(device, args.bitstream.read())
-        await device.set_voltage("AB", 3.3)
         device.close()
 
     asyncio.run(do_program())
