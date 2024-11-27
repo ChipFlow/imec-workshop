@@ -10,99 +10,113 @@ from .phy import UARTPhy
 __all__ = ["UARTPeripheral"]
 
 
-class UARTPeripheral(wiring.Component):
-    class TxData(csr.Register, access="w"):
-        """valid to write to when tx_ready is 1, will trigger a transmit"""
-        def __init__(self):
-            super().__init__(csr.Field(csr.action.W, 8))
-
-    class RxData(csr.Register, access="r"):
-        """valid to read from when rx_avail is 1, last received byte"""
-        def __init__(self):
-            super().__init__(csr.Field(csr.action.R, 8))
-
-    class TxReady(csr.Register, access="r"):
-        """is '1' when 1-byte transmit buffer is empty"""
-        def __init__(self):
-            super().__init__(csr.Field(csr.action.R, 1))
-
-    class RxAvail(csr.Register, access="r"):
-        """is '1' when 1-byte receive buffer is full; reset by a read from rx_data"""
-        def __init__(self):
-            super().__init__(csr.Field(csr.action.R, 1))
-
-    class Divisor(csr.Register, access="rw"):
-        """baud divider, defaults to init_divisor"""
-        def __init__(self, init_divisor):
-            super().__init__(csr.Field(csr.action.RW, 24, init=init_divisor))
-
-    """
-    A custom, minimal UART.
-    """
-    def __init__(self, *, ports, init_divisor):
-        assert len(ports.rx) == 1 and ports.rx.direction in (io.Direction.Input, io.Direction.Bidir)
-        assert len(ports.tx) == 1 and ports.tx.direction in (io.Direction.Output, io.Direction.Bidir)
-
-        self.ports = PortGroup(rx=ports.rx, tx=ports.tx)
-        self.init_divisor = init_divisor
-
-        regs = csr.Builder(addr_width=5, data_width=8)
-
-        self._tx_data  = regs.add("tx_data",  self.TxData(),  offset=0x00)
-        self._rx_data  = regs.add("rx_data",  self.RxData(),  offset=0x04)
-        self._tx_ready = regs.add("tx_ready", self.TxReady(), offset=0x08)
-        self._rx_avail = regs.add("rx_avail", self.RxAvail(), offset=0x0c)
-        self._divisor  = regs.add("divisor",  self.Divisor(init_divisor), offset=0x10)
-
-        self._bridge = csr.Bridge(regs.as_memory_map())
-
-        super().__init__({
-            "csr_bus": In(csr.Signature(addr_width=regs.addr_width, data_width=regs.data_width)),
-        })
-        self.csr_bus.memory_map = self._bridge.bus.memory_map
+class _PhyConfigFieldAction(csr.FieldAction):
+    """A field that is read/write if `w_en` is asserted, and read-only otherwise."""
+    def __init__(self, shape, *, init=0):
+        super().__init__(shape, access="rw", members=(
+            ("data", Out(shape)),
+            ("w_en", In(1)),
+        ))
+        self._storage = Signal(shape, init=init)
 
     def elaborate(self, platform):
         m = Module()
-        m.submodules.bridge = self._bridge
 
-        connect(m, flipped(self.csr_bus), self._bridge.bus)
+        with m.If(self.w_en & self.port.w_stb):
+            m.d.sync += self._storage.eq(self.port.w_data)
 
-        m.submodules.rx_buffer = rx_buffer = io.Buffer("i", self.ports.rx)
-        m.submodules.tx_buffer = tx_buffer = io.Buffer("o", self.ports.tx)
-
-        m.submodules.tx = tx = AsyncSerialTX(divisor=self.init_divisor, divisor_bits=24)
         m.d.comb += [
-            tx_buffer.o.eq(tx.o),
-
-            tx.data.eq(self._tx_data.f.w_data),
-            tx.ack.eq(self._tx_data.f.w_stb),
-            self._tx_ready.f.r_data.eq(tx.rdy),
-
-            tx.divisor.eq(self._divisor.f.data)
+            self.port.r_data.eq(self._storage),
+            self.data.eq(self._storage),
         ]
 
-        rx_data_ff = Signal(8)
-        rx_avail   = Signal()
+        return m
 
-        m.submodules.rx = rx = AsyncSerialRX(divisor=self.init_divisor, divisor_bits=24)
 
-        with m.If(self._rx_data.f.r_stb):
-            m.d.sync += rx_avail.eq(0)
+class UARTPeripheral(wiring.Component):
+    class Config(csr.Register, access="rw"):
+        enable: csr.Field(csr.action.RW,       1)
+        _unimp: csr.Field(csr.action.ResRAW0, 31)
 
-        with m.If(rx.rdy):
-            m.d.sync += [
-                rx_data_ff.eq(rx.data),
-                rx_avail.eq(1)
-            ]
+    class PhyConfig(csr.Register, access="rw"):
+        def __init__(self, divisor_init):
+            super().__init__({
+                "divisor": csr.Field(_PhyConfigFieldAction, 24, init=divisor_init),
+                "_unimp":  csr.Field(csr.action.ResRAWL,     8),
+            })
+
+    class RxStatus(csr.Register, access="rw"):
+        ready:    csr.Field(csr.action.R,        1)
+        overflow: csr.Field(csr.action.RW1C,     1)
+        error:    csr.Field(csr.action.RW1C,     1)
+        _unimp:   csr.Field(csr.action.ResRAW0, 29)
+
+    class RxData(csr.Register, access="r"):
+        symbol: csr.Field(csr.action.R,        8)
+        _unimp: csr.Field(csr.action.ResRAWL, 24)
+
+    class TxStatus(csr.Register, access="r"):
+        ready:  csr.Field(csr.action.R,        1)
+        _unimp: csr.Field(csr.action.ResRAW0, 31)
+
+    class TxData(csr.Register, access="w"):
+        symbol: csr.Field(csr.action.W,        8)
+        _unimp: csr.Field(csr.action.ResRAWL, 24)
+
+    def __init__(self, divisor_init):
+        regs = csr.Builder(addr_width=10, data_width=8)
+
+        with regs.Cluster("Rx"):
+            self._rx_config     = regs.add("Config",    self.Config(),                offset=0x000)
+            self._rx_phy_config = regs.add("PhyConfig", self.PhyConfig(divisor_init), offset=0x004)
+            self._rx_status     = regs.add("Status",    self.RxStatus(),              offset=0x008)
+            self._rx_data       = regs.add("Data",      self.RxData(),                offset=0x00c)
+
+        with regs.Cluster("Tx"):
+            self._tx_config     = regs.add("Config",    self.Config(),                offset=0x200)
+            self._tx_phy_config = regs.add("PhyConfig", self.PhyConfig(divisor_init), offset=0x204)
+            self._tx_status     = regs.add("Status",    self.TxStatus(),              offset=0x208)
+            self._tx_data       = regs.add("Data",      self.TxData(),                offset=0x20c)
+
+        self._csr_bridge = csr.Bridge(regs.as_memory_map())
+
+        super().__init__({
+            "csr_bus": In(csr.Signature(addr_width=10, data_width=8)),
+            "phy":     Out(UARTPhy.Signature()),
+        })
+        self.csr_bus.memory_map = self._csr_bridge.bus.memory_map
+
+    def elaborate(self, platform):
+        m = Module()
+
+        m.submodules.csr_bridge = self._csr_bridge
+
+        connect(m, flipped(self.csr_bus), self._csr_bridge.bus)
 
         m.d.comb += [
-            rx.i.eq(rx_buffer.i),
+            self.phy.rx.reset.eq(~self._rx_config.f.enable.data),
 
-            self._rx_data.f.r_data.eq(rx_data_ff),
-            self._rx_avail.f.r_data.eq(rx_avail),
-            rx.ack.eq(~rx_avail),
+            self._rx_phy_config.f.divisor.w_en.eq(self.phy.rx.reset),
+            self.phy.rx.config.divisor.eq(self._rx_phy_config.f.divisor.data),
 
-            rx.divisor.eq(self._divisor.f.data)
+            self._rx_status.f.ready.r_data.eq(self.phy.rx.symbols.valid),
+            self._rx_status.f.overflow.set.eq(self.phy.rx.overflow),
+            self._rx_status.f.error.set.eq(self.phy.rx.error),
+
+            self._rx_data.f.symbol.r_data.eq(self.phy.rx.symbols.payload),
+            self.phy.rx.symbols.ready.eq(self._rx_data.f.symbol.r_stb),
+        ]
+
+        m.d.comb += [
+            self.phy.tx.reset.eq(~self._tx_config.f.enable.data),
+
+            self._tx_phy_config.f.divisor.w_en.eq(self.phy.tx.reset),
+            self.phy.tx.config.divisor.eq(self._tx_phy_config.f.divisor.data),
+
+            self._tx_status.f.ready.r_data.eq(self.phy.tx.symbols.ready),
+
+            self.phy.tx.symbols.payload.eq(self._tx_data.f.symbol.w_data),
+            self.phy.tx.symbols.valid.eq(self._tx_data.f.symbol.w_stb),
         ]
 
         return m
