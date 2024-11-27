@@ -75,7 +75,7 @@ def task_run_sim():
 
     return {
         "actions": [
-            CmdAction(f"cd {OUTPUT_DIR} && ./sim_soc{exe}", buffering=1)
+            CmdAction(f"{'' if os.name == 'nt' else './'}sim_soc{exe}", buffering=1, cwd=OUTPUT_DIR)
         ],
         "file_dep": [
             f"{OUTPUT_DIR}/sim_soc{exe}"
