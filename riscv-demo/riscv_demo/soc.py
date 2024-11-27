@@ -9,7 +9,7 @@ from amaranth_soc.wishbone.sram import WishboneSRAM
 from minerva.core import Minerva
 
 from .ips.qspi import QSPIController, WishboneQSPIFlashController
-from .ips.uart import UARTPeripheral
+from .ips.uart import UARTPhy, UARTPeripheral
 
 
 __all__ = ["DemoSoC"]
