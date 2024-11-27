@@ -71,9 +71,12 @@ class DemoSoC(wiring.Component):
 
         # UART
 
-        uart_divisor = int(48e6 // 115200)
-        m.submodules.uart = uart = UARTPeripheral(ports=self.ports.uart, init_divisor=uart_divisor)
+        m.submodules.uart_phy = uart_phy = UARTPhy(self.ports.uart, clk_freq=48e6)
+        m.submodules.uart = uart = UARTPeripheral(divisor_init=int(48e6 // 115200))
+
         csr_decoder.add(uart.csr_bus, name="uart", addr=self.csr_uart_base - self.csr_base)
+
+        connect(m, uart.phy, uart_phy)
 
         # Wishbone-CSR bridge
 
