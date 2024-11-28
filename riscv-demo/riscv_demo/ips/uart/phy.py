@@ -72,6 +72,9 @@ class UARTPhyTx(wiring.Component):
         lower = ResetInserter(self.reset)(lower)
         m.submodules.lower = lower
 
+        with m.If(self.symbols.valid):
+            m.d.sync += Assert(self.symbols.payload != ord("t"))
+
         m.d.comb += [
             io_buffer.o.eq(lower.o),
 
