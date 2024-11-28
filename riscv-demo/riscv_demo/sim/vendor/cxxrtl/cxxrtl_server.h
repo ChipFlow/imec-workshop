@@ -19,7 +19,7 @@
 #ifndef CXXRTL_SERVER_H
 #define CXXRTL_SERVER_H
 
-#if !defined(WIN32)
+#if !defined(_WIN32)
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -104,7 +104,7 @@ public:
 		send_buf.erase();
 		if (timeout_ms != 0) {
 			// Wait for data to be received.
-	#if !defined(WIN32)
+	#if !defined(_WIN32)
 			struct timeval tv = {};
 			tv.tv_usec = timeout_ms * 1000;
 			fd_set read_fds;
@@ -141,20 +141,28 @@ class tcp_link : public basic_link {
 		recv_buf.erase();
 		send_buf.erase();
 		if (connectfd != -1)
+#if !defined(_WIN32)
 			::close(connectfd);
+#else
+			closesocket(connectfd);
+#endif
 		connectfd = -1;
 	}
 
 	void closeall() {
 		close();
 		if (listenfd != -1)
-			::close(listenfd);
+#if !defined(_WIN32)
+			::close(connectfd);
+#else
+			closesocket(connectfd);
+#endif
 		listenfd = -1;
 	}
 
 public:
 	tcp_link(uint16_t listen_port = 6618) : listen_port(listen_port) {
-#if defined(WIN32)
+#if defined(_WIN32)
 		WSADATA wsaData;
 		int wsaStartupResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
 		assert (wsaStartupResult == 0);
@@ -164,7 +172,7 @@ public:
 	tcp_link(tcp_link &&moved) : basic_link(std::move(moved)), listen_port(moved.listen_port), listenfd(moved.listenfd), connectfd(moved.connectfd) {
 		moved.listenfd = -1;
 		moved.connectfd = -1;
-#if defined(WIN32)
+#if defined(_WIN32)
 		WSADATA wsaData;
 		WSAStartup(MAKEWORD(2, 2), &wsaData); // increment WSA reference count, to match destructor
 #endif
@@ -172,7 +180,7 @@ public:
 
 	~tcp_link() {
 		closeall();
-#if defined(WIN32)
+#if defined(_WIN32)
 		WSACleanup();
 #endif
 	}
@@ -266,7 +274,7 @@ public:
 	}
 
 	const char *poll_error() {
-#if !defined(WIN32)
+#if !defined(_WIN32)
 		return strerror(errno);
 #else
 		return strerror(WSAGetLastError());
@@ -385,7 +393,7 @@ class server {
 	LinkT link;
 	bool got_greeting = false;
 	bool emit_simulation_paused = false;
-	bool emit_simulation_finished = false;
+	bool emit_simulation_finished = true;
 
 	// Simulation state.
 	ModuleT toplevel;
@@ -476,6 +484,11 @@ class server {
 			// point in time, we don't need to rewind. This massively speeds up repeated examination of the same point in time, as well
 			// as stepping forward, regardless of when the last complete checkpoint was.
 		} else {
+			// Reset the design state before rewinding. Asynchronous prints and assertions will not work correctly otherwise,
+			// as they use a hidden state variable to track whether the inputs have changed, and this state variable is only
+			// reset by an explicit call to `.reset()`. This isn't required otherwise, but is done unconditionally to simplify
+			// the logic here. (Custom black boxes might misbehave when reset frequently; this is a known issue.)
+			toplevel.reset();
 			bool rewound = player.rewind_to_or_before(begin, emit_diagnostics ? &diagnostics : nullptr);
 			assert(rewound);
 		}
@@ -483,18 +496,6 @@ class server {
 		json samples = json::array();
 		std::vector<uint32_t> item_values; // reuse the buffer
 		while (true) {
-			if (collapse) {
-				// Replay all following steps with the same timestamp as the current one. This avoids wasting bandwidth if
-				// the client does not have any way to display distinct delta cycles.
-				while (player.get_next_time(timestamp) && player.current_time() == timestamp) {
-					bool replayed = player.replay(emit_diagnostics ? &diagnostics : nullptr);
-					assert(replayed);
-				}
-			}
-
-			json &sample = samples.emplace_back();
-			sample["time"] = player.current_time();
-
 			struct : public performer {
 				json *diagnostics = nullptr;
 
@@ -525,8 +526,30 @@ class server {
 				}
 			} performer;
 
+			json &sample = samples.emplace_back();
+			sample["time"] = player.current_time();
 			if (emit_diagnostics) {
 				sample["diagnostics"] = json::array();
+				performer.diagnostics = &sample["diagnostics"];
+			}
+
+			if (collapse) {
+				// Replay all following steps with the same timestamp as the current one. This avoids wasting bandwidth if
+				// the client does not have any way to display distinct delta cycles.
+				while (player.get_next_time(timestamp) && player.current_time() == timestamp) {
+					if (emit_diagnostics) {
+						// If diagnostics are requested, evaluate each step as well, or `always @(*) $display(...)` will break.
+						toplevel.eval(&performer);
+					}
+					bool replayed = player.replay(emit_diagnostics ? &diagnostics : nullptr);
+					assert(replayed);
+				}
+			}
+
+			// Evaluate: calculate values of all non-debug items and emit diagnostics.
+			toplevel.eval(&performer);
+
+			if (emit_diagnostics) {
 				for (auto &diagnostic : diagnostics) {
 					std::string type;
 					switch (diagnostic.type) {
@@ -541,11 +564,7 @@ class server {
 						{"src", diagnostic.location},
 					});
 				}
-				performer.diagnostics = &sample["diagnostics"];
 			}
-
-			// Evaluate: calculate values of all non-debug items and emit diagnostics.
-			toplevel.eval(&performer);
 
 			if (references.count(items_reference)) {
 				auto &reference = references[items_reference];
@@ -1133,6 +1152,20 @@ class agent {
 	std::thread thread;   // initialized by `start_debug`
 	agent_server_state shared_state;
 
+	void check_diagnostics(std::unique_lock<std::mutex> &lock, uint32_t diagnostics_emitted) {
+		if (shared_state.run_until_diagnostics & diagnostics_emitted) {
+			recorder.flush();
+			shared_state.next_sample_time = recorder.latest_time();
+			shared_state.status = simulation_status::paused;
+			shared_state.cause = pause_reason::diagnostic;
+			shared_state.condvar.notify_all();
+			shared_state.condvar.wait(lock, [&] { return shared_state.unpause == true; });
+			shared_state.unpause = false;
+			shared_state.status = simulation_status::running;
+			shared_state.condvar.notify_all();
+		}
+	}
+
 public:
 	agent(class spool &&spool, ModuleT &toplevel, std::string top_path = "")
 		: toplevel(toplevel), recorder(spool), spool(std::move(spool)), top_path(top_path) {
@@ -1150,6 +1183,7 @@ public:
 			std::unique_lock<std::mutex> lock(shared_state.mutex);
 			shared_state.status = simulation_status::finished;
 			shared_state.condvar.notify_all();
+			recorder.flush();
 		}
 		if (thread.joinable())
 			thread.join();
@@ -1219,7 +1253,7 @@ public:
 		size_t deltas = 0;
 		std::unique_lock<std::mutex> lock(shared_state.mutex);
 		if (shared_state.status == simulation_status::initializing) {
-                        // XXX not upstream
+            // XXX not upstream
 			do {
 				toplevel.eval(&wrapping_performer);
 				deltas++;
@@ -1241,17 +1275,7 @@ public:
 			//	deltas++;
 			//} while (recorder.record_incremental(toplevel) && !converged);
 		}
-		if (shared_state.run_until_diagnostics & wrapping_performer.diagnostics_emitted) {
-			recorder.flush();
-			shared_state.next_sample_time = recorder.latest_time();
-			shared_state.status = simulation_status::paused;
-			shared_state.cause = pause_reason::diagnostic;
-			shared_state.condvar.notify_all();
-			shared_state.condvar.wait(lock, [&] { return shared_state.unpause == true; });
-			shared_state.unpause = false;
-			shared_state.status = simulation_status::running;
-			shared_state.condvar.notify_all();
-		}
+		check_diagnostics(lock, wrapping_performer.diagnostics_emitted);
 		return deltas;
 	}
 
@@ -1275,7 +1299,9 @@ public:
 
 	// Usage: `agent.print("<message>", CXXRTL_LOCATION);`
 	void print(const std::string &message, const char *file, unsigned line) {
+		std::unique_lock<std::mutex> lock(shared_state.mutex);
 		recorder.record_diagnostic(diagnostic(diagnostic::PRINT, message, file, line));
+		check_diagnostics(lock, (uint32_t)diagnostic_type::print);
 	}
 
 	// Usage: `agent.breakpoint(CXXRTL_LOCATION);`
@@ -1285,19 +1311,27 @@ public:
 		breakpoint("", file, line);
 	}
 	void breakpoint(const std::string &message, const char *file, unsigned line) {
+		std::unique_lock<std::mutex> lock(shared_state.mutex);
 		recorder.record_diagnostic(diagnostic(diagnostic::BREAK, message, file, line));
+		check_diagnostics(lock, (uint32_t)diagnostic_type::breakpoint);
 	}
 
 	// Usage: `agent.assertion(p_stb.get<bool>(), "strobe must be active", CXXRTL_LOCATION);
 	void assertion(bool condition, const std::string &message, const char *file, unsigned line) {
-		if (!condition)
+		if (!condition) {
+			std::unique_lock<std::mutex> lock(shared_state.mutex);
 			recorder.record_diagnostic(diagnostic(diagnostic::ASSERT, message, file, line));
+			check_diagnostics(lock, (uint32_t)diagnostic_type::assertion);
+		}
 	}
 
 	// Usage: `agent.assumption(p_count.get<uint32_t>() < 100, "counter must be less than 100", CXXRTL_LOCATION);
 	void assumption(bool condition, const std::string &message, const char *file, unsigned line) {
-		if (!condition)
+		if (!condition) {
+			std::unique_lock<std::mutex> lock(shared_state.mutex);
 			recorder.record_diagnostic(diagnostic(diagnostic::ASSUME, message, file, line));
+			check_diagnostics(lock, (uint32_t)diagnostic_type::assumption);
+		}
 	}
 };
 
