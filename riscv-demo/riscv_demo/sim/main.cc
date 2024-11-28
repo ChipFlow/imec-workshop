@@ -1,12 +1,8 @@
 #undef NDEBUG
 
-#define TRACE 0
-
 #include <cxxrtl/cxxrtl.h>
 #include <cxxrtl/cxxrtl_server.h>
-#if TRACE
 #include <cxxrtl/cxxrtl_vcd.h>
-#endif
 #include "sim_soc.h"
 #include "models.h"
 
@@ -30,17 +26,17 @@ int main(int argc, char **argv) {
     if (getenv("DEBUG")) // can also be done when a condition is violated, etc
         std::cerr << "Waiting for debugger on " << agent.start_debugging() << std::endl;
 
-#if TRACE
     cxxrtl::vcd_writer vcd;
     std::ofstream vcd_file;
     debug_items debug_items;
     uint64_t cycle = 0;
 
-    vcd_file.open("trace.vcd");
-    top.debug_info(&debug_items, /*scopes=*/nullptr, "");
-    vcd.timescale(1, "us");
-    vcd.add_without_memories(debug_items);
-#endif
+    if (getenv("TRACE")) {
+        vcd_file.open("trace.vcd");
+        top.debug_info(&debug_items, /*scopes=*/nullptr, "");
+        vcd.timescale(1, "us");
+        vcd.add_without_memories(debug_items);
+    }
 
     unsigned timestamp = 0;
     auto tick = [&]() {
@@ -51,9 +47,9 @@ int main(int argc, char **argv) {
         agent.step();
         agent.advance(1_us);
         ++timestamp;
-#if TRACE
-	vcd.sample(2 * cycle);
-#endif
+
+        if (getenv("TRACE"))
+            vcd.sample(2 * cycle);
 
         top.p_clk.set(true);
         agent.step();
@@ -62,12 +58,13 @@ int main(int argc, char **argv) {
 
         if (timestamp % 100000 == 0)
             agent.snapshot();
-#if TRACE
-	vcd.sample(2 * cycle + 1);
-	vcd_file << vcd.buffer;
-	vcd.buffer.clear();
-	cycle += 1;
-#endif
+
+        if (getenv("TRACE")) {
+            vcd.sample(2 * cycle + 1);
+            vcd_file << vcd.buffer;
+            vcd.buffer.clear();
+            cycle += 1;
+        }
     };
 
     flash.load_data("../../zephyr.bin", 0x00100000U);
