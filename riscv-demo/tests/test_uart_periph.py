@@ -83,6 +83,26 @@ class PeripheralTestCase(unittest.TestCase):
         async def testbench(ctx):
             # PHY disabled ========================================================================
 
+            # - read RxPhyConfig (divisor=416):
+            await _csr_access(self, ctx, dut, rx_phy_config_addr, r_stb=1, r_data=416)
+
+            # - write 5000 to RxPhyConfig:
+            await _csr_access(self, ctx, dut, rx_phy_config_addr, w_stb=1, w_data=5000)
+            await ctx.tick()
+
+            # - read RxPhyConfig (divisor=5000):
+            await _csr_access(self, ctx, dut, rx_phy_config_addr, r_stb=1, r_data=5000)
+
+            # - read TxPhyConfig (divisor=416):
+            await _csr_access(self, ctx, dut, tx_phy_config_addr, r_stb=1, r_data=416)
+
+            # - write 5000 to TxPhyConfig:
+            await _csr_access(self, ctx, dut, tx_phy_config_addr, w_stb=1, w_data=5000)
+            await ctx.tick()
+
+            # - read TxPhyConfig (divisor=5000):
+            await _csr_access(self, ctx, dut, tx_phy_config_addr, r_stb=1, r_data=5000)
+
             # - read RxStatus (ready=0, overflow=0, error=0):
             await _csr_access(self, ctx, dut, rx_status_addr, r_stb=1, r_data=0b000)
 
@@ -110,6 +130,26 @@ class PeripheralTestCase(unittest.TestCase):
             await _csr_access(self, ctx, dut, rx_status_addr, r_stb=1, r_data=0b000)
 
             # PHY enabled =========================================================================
+
+            # - read RxPhyConfig (divisor=5000):
+            await _csr_access(self, ctx, dut, rx_phy_config_addr, r_stb=1, r_data=5000)
+
+            # - write 416 to RxPhyConfig:
+            await _csr_access(self, ctx, dut, rx_phy_config_addr, w_stb=1, w_data=416)
+            await ctx.tick()
+
+            # - read RxPhyConfig (divisor=5000):
+            await _csr_access(self, ctx, dut, rx_phy_config_addr, r_stb=1, r_data=5000)
+
+            # - read TxPhyConfig (divisor=5000):
+            await _csr_access(self, ctx, dut, tx_phy_config_addr, r_stb=1, r_data=5000)
+
+            # - write 416 to TxPhyConfig:
+            await _csr_access(self, ctx, dut, tx_phy_config_addr, w_stb=1, w_data=416)
+            await ctx.tick()
+
+            # - read TxPhyConfig (divisor=5000):
+            await _csr_access(self, ctx, dut, tx_phy_config_addr, r_stb=1, r_data=5000)
 
             for c in "abcd":
                 # - read TxStatus (ready=1):
