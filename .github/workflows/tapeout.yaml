@@ -1,0 +1,34 @@
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  merge_group:
+
+jobs:
+  submit:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: ./riscv-demo
+    steps:
+      - name: Check out source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Set up PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          cache: true
+          cache-dependency-path: ./riscv-demo/pdm.lock
+      - name: Install dependencies
+        run: |
+          pdm install
+      - run: |
+          pdm run chipflow silicon submit
+        env:
+          CHIPFLOW_API_KEY_ID: ${{ secrets.CHIPFLOW_API_KEY_ID }}
+          CHIPFLOW_API_KEY_SECRET: ${{ secrets.CHIPFLOW_API_KEY_SECRET }}
