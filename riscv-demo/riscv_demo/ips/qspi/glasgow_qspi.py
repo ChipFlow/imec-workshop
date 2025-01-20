@@ -149,8 +149,8 @@ class QSPIDeframer(wiring.Component): # meow :3
 
 
 class QSPIController(wiring.Component):
-    def __init__(self, ports, *, chip_count=1, use_ddr_buffers=False):
-        self.ioshape = IOShape({
+    def pins(chip_count=1):
+        return IOShape({
             "sck": ("o",  1),
             "io0": ("io", 1),
             "io1": ("io", 1),
@@ -159,10 +159,10 @@ class QSPIController(wiring.Component):
             "cs":  ("o",  chip_count),
         })
 
-        self._ports = self.ioshape.check_ports(ports)
-
+    def __init__(self, *, chip_count=1, use_ddr_buffers=False):
         self._ddr = use_ddr_buffers
         self._chip_count = chip_count
+        self._ioshape = self.pins(chip_count)
 
         super().__init__(PortSignature({
             "o_octets": In(stream.Signature(data.StructLayout({
@@ -182,15 +182,16 @@ class QSPIController(wiring.Component):
 
         m = Module()
 
+        self.ports = platform.get_ports()
         m.submodules.enframer = enframer = QSPIEnframer(chip_count = self._chip_count)
         connect(m, controller=flipped(self.o_octets), enframer=enframer.octets)
 
-        m.submodules.io_clocker = io_clocker = IOClocker(self.ioshape,
+        m.submodules.io_clocker = io_clocker = IOClocker(self._ioshape,
             clock="sck", o_ratio=ratio, meta_layout=QSPIMode)
         connect(m, enframer=enframer.frames, io_clocker=io_clocker.i_stream)
         m.d.comb += io_clocker.divisor.eq(self.divisor)
 
-        m.submodules.io_streamer = io_streamer = IOStreamer(self.ioshape, self._ports, init={
+        m.submodules.io_streamer = io_streamer = IOStreamer(self._ioshape, self._ports, init={
             "sck": {"o": 1, "oe": 1}, # Motorola "Mode 3" with clock idling high
             "cs":  {"o": 0, "oe": 1}, # deselected
         }, ratio=ratio, meta_layout=QSPIMode)
