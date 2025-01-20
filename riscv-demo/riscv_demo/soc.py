@@ -18,10 +18,11 @@ __all__ = ["DemoSoC"]
 
 
 class DemoSoC(wiring.Component):
-    pins = IOShape({
+    def pins():
+        return IOShape({
                 'qspi': QSPIController.pins(),
-                'uart0': UARTPhy.pins(),
-                'uart1': UARTPhy.pins(),
+                # 'uart0': UARTPhy.pins(),
+                # 'uart1': UARTPhy.pins(),
                 })
 
     def __init__(self):

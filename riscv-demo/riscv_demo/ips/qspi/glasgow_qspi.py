@@ -33,12 +33,7 @@ class QSPIEnframer(wiring.Component):
                 "data": 8,
             }))),
             "frames": Out(IOClocker.i_stream_signature({
-                "sck": ("o",  1),
-                "io0": ("io", 1),
-                "io1": ("io", 1),
-                "io2": ("io", 1),
-                "io3": ("io", 1),
-                "cs":  ("o",  chip_count),
+                QSPIController.pins(chip_count)
             }, meta_layout=QSPIMode))
         })
 
