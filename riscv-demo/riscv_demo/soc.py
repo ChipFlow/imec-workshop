@@ -10,6 +10,7 @@ from minerva.core import Minerva
 
 from .ips.qspi import QSPIController, WishboneQSPIFlashController
 from .ips.uart import UARTPhy, UARTPeripheral
+from pprint import pprint, pformat
 
 
 __all__ = ["DemoSoC"]
@@ -76,6 +77,7 @@ class DemoSoC(wiring.Component):
 
         csr_decoder.add(uart.csr_bus, name="uart", addr=self.csr_uart_base - self.csr_base)
 
+        print(f"connecting UART:\nuart.phy={pformat(uart.phy)}\nuart_phy={pformat(uart_phy)}.")
         connect(m, uart.phy, uart_phy)
 
         # Wishbone-CSR bridge

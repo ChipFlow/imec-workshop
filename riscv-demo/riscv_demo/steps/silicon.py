@@ -1,12 +1,14 @@
 from amaranth import *
 from amaranth.lib import io
 from amaranth.lib.cdc import FFSynchronizer
+from pprint import pprint
 
+
+from chipflow_lib.platforms.iostream import PortGroup
 from chipflow_lib.platforms.silicon import SiliconPlatformPort
 from chipflow_lib.steps.silicon import SiliconStep
 
 from ..soc import DemoSoC
-from ..ips.ports import PortGroup
 
 
 __all__ = ["IHP130SiliconStep"]
@@ -43,8 +45,13 @@ class _IHP130Top(Elaboratable):
         ports.qspi.cs = platform.request("flash_csn")
 
         ports.uart = PortGroup()
-        ports.uart.rx = platform.request("uart0_rx")
+        rx = platform.request("uart0_rx")
+        ports.uart.rx = rx
         ports.uart.tx = platform.request("uart0_tx")
+
+        print(rx)
+        print("ports.uart.rx:")
+        pprint(ports.uart.rx)
 
         m.submodules.soc = soc = DemoSoC(ports)
 

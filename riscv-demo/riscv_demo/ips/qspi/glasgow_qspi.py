@@ -2,8 +2,10 @@ from amaranth import *
 from amaranth.lib import enum, data, wiring, stream, io
 from amaranth.lib.wiring import In, Out, connect, flipped
 
-from ..ports import PortGroup
-from .glasgow_iostream import IOStreamer, IOClocker
+from chipflow_lib.platforms.iostream import (
+        IOStreamer, IOClocker, IOShape,
+        PortGroup, PortSignature
+        )
 
 
 __all__ = ["QSPIMode", "QSPIEnframer", "QSPIDeframer", "QSPIController"]
@@ -148,23 +150,21 @@ class QSPIDeframer(wiring.Component): # meow :3
 
 class QSPIController(wiring.Component):
     def __init__(self, ports, *, chip_count=1, use_ddr_buffers=False):
-        assert len(ports.sck) == 1 and ports.sck.direction in (io.Direction.Output, io.Direction.Bidir)
-        assert len(ports.io) == 4 and ports.io.direction == io.Direction.Bidir
-        assert len(ports.cs) >= 1 and ports.cs.direction in (io.Direction.Output, io.Direction.Bidir)
+        self.ioshape = IOShape({
+            "sck": ("o",  1),
+            "io0": ("io", 1),
+            "io1": ("io", 1),
+            "io2": ("io", 1),
+            "io3": ("io", 1),
+            "cs":  ("o",  chip_count),
+        })
 
-        self._ports = PortGroup(
-            sck=ports.sck,
-            io0=ports.io[0],
-            io1=ports.io[1],
-            io2=ports.io[2],
-            io3=ports.io[3],
-            cs=~ports.cs,
-        )
+        self._ports = self.ioshape.check_ports(ports)
 
         self._ddr = use_ddr_buffers
         self._chip_count = chip_count
 
-        super().__init__({
+        super().__init__(PortSignature({
             "o_octets": In(stream.Signature(data.StructLayout({
                 "chip": range(1 + chip_count),
                 "mode": QSPIMode,
@@ -175,30 +175,22 @@ class QSPIController(wiring.Component):
             }))),
 
             "divisor": In(16),
-        })
+        }))
 
     def elaborate(self, platform):
         ratio = (2 if self._ddr else 1)
-        ioshape = {
-            "sck": ("o",  1),
-            "io0": ("io", 1),
-            "io1": ("io", 1),
-            "io2": ("io", 1),
-            "io3": ("io", 1),
-            "cs":  ("o",  len(self._ports.cs)),
-        }
 
         m = Module()
 
         m.submodules.enframer = enframer = QSPIEnframer(chip_count = self._chip_count)
         connect(m, controller=flipped(self.o_octets), enframer=enframer.octets)
 
-        m.submodules.io_clocker = io_clocker = IOClocker(ioshape,
+        m.submodules.io_clocker = io_clocker = IOClocker(self.ioshape,
             clock="sck", o_ratio=ratio, meta_layout=QSPIMode)
         connect(m, enframer=enframer.frames, io_clocker=io_clocker.i_stream)
         m.d.comb += io_clocker.divisor.eq(self.divisor)
 
-        m.submodules.io_streamer = io_streamer = IOStreamer(ioshape, self._ports, init={
+        m.submodules.io_streamer = io_streamer = IOStreamer(self.ioshape, self._ports, init={
             "sck": {"o": 1, "oe": 1}, # Motorola "Mode 3" with clock idling high
             "cs":  {"o": 0, "oe": 1}, # deselected
         }, ratio=ratio, meta_layout=QSPIMode)

@@ -2,7 +2,7 @@ from amaranth import *
 from amaranth.lib import enum, data, wiring, stream, io
 from amaranth.lib.wiring import In, Out
 
-from ..ports import PortGroup
+from chipflow_lib.platforms.iostream import PortGroup
 
 
 __all__ = ["IOStreamer"]

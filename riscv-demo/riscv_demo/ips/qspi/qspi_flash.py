@@ -6,7 +6,7 @@ from amaranth.utils import exact_log2
 from amaranth_soc import wishbone
 from amaranth_soc.memory import MemoryMap
 
-from ..ports import PortGroup
+from chipflow_lib.platforms.iostream import PortGroup
 from .glasgow_qspi import QSPIMode, QSPIController
 
 
