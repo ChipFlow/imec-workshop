@@ -7,7 +7,7 @@ from amaranth_soc.csr.wishbone import WishboneCSRBridge
 from amaranth_soc.wishbone.sram import WishboneSRAM
 
 from minerva.core import Minerva
-from chipflow_lib.platforms.iostream import IOShape
+from chipflow_lib.platforms.iostream import IOShape, PortSignature
 
 from .ips.qspi import QSPIController, WishboneQSPIFlashController
 from .ips.uart import UARTPhy, UARTPeripheral
@@ -21,12 +21,15 @@ class DemoSoC(wiring.Component):
     def pins():
         return IOShape({
                 'qspi': QSPIController.pins(),
-                # 'uart0': UARTPhy.pins(),
+                'uart': UARTPhy.pins(),
                 # 'uart1': UARTPhy.pins(),
                 })
 
     def __init__(self):
         super().__init__(PortSignature({}))
+
+        self._ioshape = self.__class__.pins()
+
        # Memory regions:
         self.mem_spiflash_base = 0x00000000
         self.mem_sram_base     = 0x10000000

@@ -143,6 +143,25 @@ class QSPIDeframer(wiring.Component): # meow :3
         return m
 
 
+
+class PortComponent(wiring.Component):
+    def _port_signature(ioshape, /, *, meta_layout=0):
+        return PortSignature({
+                "o_stream":  In(self.o_stream_signature(ioshape, ratio=ratio, meta_layout=meta_layout)),
+                "i_stream": Out(self.i_stream_signature(ioshape, ratio=ratio, meta_layout=meta_layout)),
+        })
+
+
+    def __init__(self, ioshape, init=None, meta_layout=None, ratio=1):
+        self._ioshape = ioshape
+        self._init = init
+        self._ratio = ratio
+        self.meta_layout = meta_layout
+        super().__init__({
+            _port_signature(ioshape, ratio, meta_layout)
+            })
+
+
 class QSPIController(wiring.Component):
     def pins(chip_count=1):
         return IOShape({
@@ -154,12 +173,12 @@ class QSPIController(wiring.Component):
             "cs":  ("o",  chip_count),
         })
 
-    def __init__(self, *, chip_count=1, use_ddr_buffers=False):
+    def __init__(self, ports, *, chip_count=1, use_ddr_buffers=False):
         self._ddr = use_ddr_buffers
         self._chip_count = chip_count
         self._ioshape = self.pins(chip_count)
 
-        super().__init__(PortSignature({
+        super().__init__({
             "o_octets": In(stream.Signature(data.StructLayout({
                 "chip": range(1 + chip_count),
                 "mode": QSPIMode,
@@ -170,14 +189,13 @@ class QSPIController(wiring.Component):
             }))),
 
             "divisor": In(16),
-        }))
+        })
 
     def elaborate(self, platform):
         ratio = (2 if self._ddr else 1)
 
         m = Module()
 
-        self.ports = platform.get_ports()
         m.submodules.enframer = enframer = QSPIEnframer(chip_count = self._chip_count)
         connect(m, controller=flipped(self.o_octets), enframer=enframer.octets)
 
@@ -186,21 +204,24 @@ class QSPIController(wiring.Component):
         connect(m, enframer=enframer.frames, io_clocker=io_clocker.i_stream)
         m.d.comb += io_clocker.divisor.eq(self.divisor)
 
-        m.submodules.io_streamer = io_streamer = IOStreamer(self._ioshape, self._ports, init={
-            "sck": {"o": 1, "oe": 1}, # Motorola "Mode 3" with clock idling high
-            "cs":  {"o": 0, "oe": 1}, # deselected
-        }, ratio=ratio, meta_layout=QSPIMode)
-        connect(m, io_clocker=io_clocker.o_stream, io_streamer=io_streamer.o_stream)
+        #m.submodules.io_streamer = io_streamer = IOStreamer(self._ioshape, self._ports, init={
+        #    "sck": {"o": 1, "oe": 1}, # Motorola "Mode 3" with clock idling high
+        #    "cs":  {"o": 0, "oe": 1}, # deselected
+        #}, ratio=ratio, meta_layout=QSPIMode)
+
+        m.submodules.port = port = self.port
+
+        connect(m, io_clocker=io_clocker.o_stream, port=self.port)
 
         m.submodules.deframer = deframer = QSPIDeframer()
         m.d.comb += [ # connect() wouldn't work if DDR buffers are used
-            deframer.frames.p.port.io0.i.eq(io_streamer.i_stream.p.port.io0.i[0]),
-            deframer.frames.p.port.io1.i.eq(io_streamer.i_stream.p.port.io1.i[0]),
-            deframer.frames.p.port.io2.i.eq(io_streamer.i_stream.p.port.io2.i[0]),
-            deframer.frames.p.port.io3.i.eq(io_streamer.i_stream.p.port.io3.i[0]),
-            deframer.frames.p.meta.eq(io_streamer.i_stream.p.meta),
-            deframer.frames.valid.eq(io_streamer.i_stream.valid),
-            io_streamer.i_stream.ready.eq(deframer.frames.ready),
+            deframer.frames.p.port.io0.i.eq(port.i_stream.p.port.io0.i[0]),
+            deframer.frames.p.port.io1.i.eq(port.i_stream.p.port.io1.i[0]),
+            deframer.frames.p.port.io2.i.eq(port.i_stream.p.port.io2.i[0]),
+            deframer.frames.p.port.io3.i.eq(port.i_stream.p.port.io3.i[0]),
+            deframer.frames.p.meta.eq(port.i_stream.p.meta),
+            deframer.frames.valid.eq(port.i_stream.valid),
+            port.i_stream.ready.eq(deframer.frames.ready),
         ]
 
         connect(m, deframer=deframer.octets, controller=flipped(self.i_octets))

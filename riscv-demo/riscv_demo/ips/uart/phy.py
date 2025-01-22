@@ -1,17 +1,16 @@
 from amaranth import *
 from amaranth.lib import data, io, stream, wiring
-from amaranth.lib.wiring import In, Out, flipped, connect
+from amaranth.lib.wiring import In, Out, flipped, connect, Signature
 
 from amaranth_stdio.serial import AsyncSerialRX, AsyncSerialTX
+from chipflow_lib.platforms.iostream import IOShape, PortSignature
 
 
 __all__ = ["UARTPhyRx", "UARTPhyTx", "UARTPhy"]
 
 
 class UARTPhyRx(wiring.Component):
-    class Signature(wiring.Signature):
-        def __init__(self):
-            super().__init__({
+    _signature = Signature({
                 "reset":    Out(1),
                 "config":   Out(data.StructLayout({"divisor": unsigned(24)})),
                 "symbols":  In(stream.Signature(unsigned(8))),
@@ -20,7 +19,7 @@ class UARTPhyRx(wiring.Component):
             })
 
     def __init__(self, port, clk_freq):
-        super().__init__(self.Signature().flip())
+        super().__init__(UARTPhyRx._signature.flip())
         self._port = port
         self._clk_freq = clk_freq
 
@@ -50,9 +49,7 @@ class UARTPhyRx(wiring.Component):
 
 
 class UARTPhyTx(wiring.Component):
-    class Signature(wiring.Signature):
-        def __init__(self):
-            super().__init__({
+    _signature = wiring.Signature({
                 "reset":   Out(1),
                 "config":  Out(data.StructLayout({"divisor": unsigned(24)})),
                 "symbols": Out(stream.Signature(unsigned(8)))
@@ -86,15 +83,21 @@ class UARTPhyTx(wiring.Component):
 
 
 class UARTPhy(wiring.Component):
-    class Signature(wiring.Signature):
-        def __init__(self):
-            super().__init__({
-                "rx": Out(UARTPhyRx.Signature()),
-                "tx": Out(UARTPhyTx.Signature()),
-            })
+    _signature = PortSignature({
+        "rx": Out(UARTPhyRx._signature),
+        "tx": Out(UARTPhyTx._signature),
+    })
+
+    def pins():
+        return IOShape({
+            "rx": ("i", 1),
+            "tx": ("i", 1),
+        })
 
     def __init__(self, ports, clk_freq):
         super().__init__(self.Signature().flip())
+        self._ioshape = UARTPhy.pins()
+        self.ports = ports
         self._rx = UARTPhyRx(ports.rx, clk_freq)
         self._tx = UARTPhyTx(ports.tx, clk_freq)
 
