@@ -9,10 +9,10 @@ from doit.cmd_base import ModuleTaskLoader
 from doit.doit_cmd import DoitMain
 
 from chipflow_lib.steps.sim import SimStep
+from chipflow_lib.platforms.iostream import PortGroup
 
 from ..soc import DemoSoC
 from ..sim import doit_build
-from ..ips.ports import PortGroup
 
 
 __all__ = ["CXXRTLSimStep"]

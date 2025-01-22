@@ -1,39 +1,30 @@
 [chipflow]
-project_id = 14
+project_name = "riscv-demo"
 
 [chipflow.steps]
 sim     = "riscv_demo.steps.sim:CXXRTLSimStep"
 board   = "riscv_demo.steps.board:GlasgowBoardStep"
-silicon = "riscv_demo.steps.silicon:IHP130SiliconStep"
+silicon = "chipflow_lib.steps.silicon:SiliconStep"
 
 [chipflow.silicon]
 process  = "ihp_sg13g2"
 pad_ring = "pga144"
+reset = "sys_rst_n"
+
+[chipflow.top]
+soc = "riscv_demo.soc:DemoSoC"
+heartbeat = "chipflow_lib:Heartbeat"
+
+[chipflow.silicon.clocks]
+default = 'sys_clk'
 
 [chipflow.silicon.pads]
-
-# QSPI flash
-flash_clk = { type = "o",  loc = "2" }
-flash_csn = { type = "o",  loc = "3" }
-flash_d0  = { type = "io",  loc = "4" }
-flash_d1  = { type = "io",  loc = "5" }
-flash_d2  = { type = "io",  loc = "6" }
-flash_d3  = { type = "io",  loc = "7" }
-
-# I2C 0
-i2c0_scl = { type = "io", loc = "26" }
-i2c0_sda = { type = "io", loc = "27" }
-
-# UART 0
-uart0_rx = {type = "i", loc = "78" }
-uart0_tx = {type = "o", loc = "79" }
-
 # System
 sys_clk   = { type = "clk", loc = "114" }
-sys_rst_n = { type = "i",   loc = "115" }
-heartbeat = { type = "o",   loc = "118" }
+sys_rst_n = { type = "i", loc = "115" }
 
 [chipflow.silicon.power]
+# these will just default to default power pins defined for pga144?
 dvss0 = { loc =   "1" }
 dvdd0 = { loc =   "9" }
 vss0  = { loc =  "17" }

@@ -4,6 +4,7 @@ from doit.cmd_base import ModuleTaskLoader
 from doit.doit_cmd import DoitMain
 
 from chipflow_lib.steps.board import BoardStep
+from chipflow_lib.platforms.iostream import PortGroup
 
 from glasgow.platform.generic import GlasgowPlatformPort
 from glasgow.platform.rev_c import GlasgowRevC123Platform
@@ -12,7 +13,6 @@ from glasgow.target.toolchain import find_toolchain
 
 from ..soc import DemoSoC
 from ..board import doit_glasgow
-from ..ips.ports import PortGroup
 
 
 __all__ = ["GlasgowBoardStep"]
