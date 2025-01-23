@@ -4,7 +4,7 @@ from amaranth.lib.wiring import In, Out, connect, flipped
 
 from chipflow_lib.platforms.iostream import (
         IOStreamer, IOClocker, IOShape,
-        PortGroup, PortSignature
+        PortComponent
         )
 
 
@@ -144,27 +144,11 @@ class QSPIDeframer(wiring.Component): # meow :3
 
 
 
-class PortComponent(wiring.Component):
-    def _port_signature(ioshape, /, *, meta_layout=0):
-        return PortSignature({
-                "o_stream":  In(self.o_stream_signature(ioshape, ratio=ratio, meta_layout=meta_layout)),
-                "i_stream": Out(self.i_stream_signature(ioshape, ratio=ratio, meta_layout=meta_layout)),
-        })
-
-
-    def __init__(self, ioshape, init=None, meta_layout=None, ratio=1):
-        self._ioshape = ioshape
-        self._init = init
-        self._ratio = ratio
-        self.meta_layout = meta_layout
-        super().__init__({
-            _port_signature(ioshape, ratio, meta_layout)
-            })
-
-
 class QSPIController(wiring.Component):
-    def pins(chip_count=1):
-        return IOShape({
+    def __init__(self, ports, *, chip_count=1, use_ddr_buffers=False):
+        self._ddr = use_ddr_buffers
+        self._chip_count = chip_count
+        self._ioshape = IOShape({
             "sck": ("o",  1),
             "io0": ("io", 1),
             "io1": ("io", 1),
@@ -173,10 +157,10 @@ class QSPIController(wiring.Component):
             "cs":  ("o",  chip_count),
         })
 
-    def __init__(self, ports, *, chip_count=1, use_ddr_buffers=False):
-        self._ddr = use_ddr_buffers
-        self._chip_count = chip_count
-        self._ioshape = self.pins(chip_count)
+        self.port = PortComponent(self._ioshape, init={
+            "sck": {"o": 1, "oe": 1}, # Motorola "Mode 3" with clock idling high
+            "cs":  {"o": 0, "oe": 1}, # deselected
+        }, ratio=ratio, meta_layout=QSPIMode)
 
         super().__init__({
             "o_octets": In(stream.Signature(data.StructLayout({

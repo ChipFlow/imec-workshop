@@ -166,6 +166,7 @@ for d, default in [("pads", "i"), ("power","pwr")]:
 
 logger.info(f'Pins in use:\n{pformat(sorted(used_pins))}')
 
+#get available pins from chipflow lib
 unallocated = sorted(set(range(144)) - used_pins)
 
 ports = {}

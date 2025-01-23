@@ -18,17 +18,12 @@ __all__ = ["DemoSoC"]
 
 
 class DemoSoC(wiring.Component):
-    def pins():
-        return IOShape({
-                'qspi': QSPIController.pins(),
-                'uart': UARTPhy.pins(),
-                # 'uart1': UARTPhy.pins(),
-                })
 
     def __init__(self):
-        super().__init__(PortSignature({}))
+        super().__init__()
 
         self._ioshape = self.__class__.pins()
+        self.port = 
 
        # Memory regions:
         self.mem_spiflash_base = 0x00000000
