@@ -3,7 +3,7 @@ from amaranth.lib import enum, data, wiring, stream
 from amaranth.lib.wiring import In, Out
 from amaranth.utils import exact_log2
 
-from amaranth_soc import wishbone
+from amaranth_soc import wishbone, csr
 from amaranth_soc.memory import MemoryMap
 
 from ..ports import PortGroup
@@ -11,7 +11,6 @@ from .glasgow_qspi import QSPIMode, QSPIController
 
 
 __all__ = ["WishboneQSPIFlashController"]
-
 
 class QSPIFlashCommand(enum.Enum, shape=8):
     Read                = 0x03
@@ -21,8 +20,53 @@ class QSPIFlashCommand(enum.Enum, shape=8):
     FastReadDualInOut   = 0xBB
     FastReadQuadInOut   = 0xEB
 
+class QSPIFlashWidth(enum.Enum, shape=2):
+    X1                = 0x00
+    X1Fast            = 0x01
+    X2                = 0x02
+    X4                = 0x03
+
+class _RawTxDataField(csr.FieldAction):
+    """A field that is read/write and exposes a strobe"""
+    def __init__(self, shape, *, init=0):
+        super().__init__(shape, access="rw", members=(
+            ("data", Out(shape)),
+            ("w_stb", Out(1)),
+        ))
+        self._storage = Signal(shape, init=init)
+
+    def elaborate(self, platform):
+        m = Module()
+
+        with m.If(self.port.w_stb):
+            m.d.sync += self._storage.eq(self.port.w_data)
+
+        m.d.comb += [
+            self.port.r_data.eq(self._storage),
+            self.data.eq(self._storage),
+            self.w_stb.eq(self.port.w_stb)
+        ]
+
+        return m
 
 class WishboneQSPIFlashController(wiring.Component):
+
+    class Config(csr.Register, access="rw"):
+        raw_enable:  csr.Field(csr.action.RW, 1)
+        width:       csr.Field(csr.action.RW, QSPIFlashWidth)
+        dummy_bits:  csr.Field(csr.action.RW, 4)
+
+    class RawControl(csr.Register):
+        ready: csr.Field(csr.action.R, 1)
+        deselect: csr.Field(csr.action.W, 1)
+
+    class RawTxData(csr.Register):
+        data: csr.Field(_RawTxDataField, 1)
+
+    class RawRxData(csr.Register):
+        data: csr.Field(csr.action.R, 1)
+
+
     def __init__(self, *, addr_width, data_width):
         super().__init__({
             "wb_bus": In(wishbone.Signature(addr_width=addr_width, data_width=data_width, granularity=8)),
@@ -43,10 +87,26 @@ class WishboneQSPIFlashController(wiring.Component):
                                            data_width=8)
         self.wb_bus.memory_map.add_resource(self, name="data", size=0x400000) # FIXME
 
+        regs = csr.Builder(addr_width=10, data_width=8)
+
+        self._config      = regs.add("Config",     self.Config(),     offset=0x000)
+        self._raw_control = regs.add("RawControl", self.RawControl(), offset=0x004)
+        self._raw_tx_data = regs.add("RawTxData",  self.RawTxData(),  offset=0x008)
+        self._raw_rx_data = regs.add("RawRxData",  self.RawRxData(),  offset=0x00c)
+
+        self._csr_bridge = csr.Bridge(regs.as_memory_map())
+        self.csr_bus.memory_map = self._csr_bridge.bus.memory_map
+
+
     def elaborate(self, platform):
         m = Module()
 
+        m.submodules.csr_bridge = self._csr_bridge
+
+        connect(m, flipped(self.csr_bus), self._csr_bridge.bus)
+
         wb_data_octets = self.wb_bus.data_width // 8
+
 
         o_addr_count = Signal(range(3))
         o_data_count = Signal(range(wb_data_octets + 1))
@@ -54,12 +114,17 @@ class WishboneQSPIFlashController(wiring.Component):
 
         flash_addr = self.wb_bus.adr << exact_log2(wb_data_octets)
 
-        with m.FSM():
+        raw_rx_data = Signal(8)
+
+        with m.FSM() as fsm:
+            # WB Memory-mapped mode
             with m.State("Wait"):
                 m.d.comb += self.spi_bus.o_octets.p.chip.eq(1)
                 m.d.comb += self.spi_bus.o_octets.p.mode.eq(QSPIMode.PutX1)
                 m.d.comb += self.spi_bus.o_octets.p.data.eq(QSPIFlashCommand.Read)
-                with m.If(self.wb_bus.cyc & self.wb_bus.stb & ~self.wb_bus.we):
+                with m.If(self._config.f.raw_enable.data):
+                    m.next = "Raw-Wait"
+                with m.Elif(self.wb_bus.cyc & self.wb_bus.stb & ~self.wb_bus.we):
                     m.d.comb += self.spi_bus.o_octets.valid.eq(1)
                     with m.If(self.spi_bus.o_octets.ready):
                         m.d.sync += o_addr_count.eq(2)
@@ -103,4 +168,36 @@ class WishboneQSPIFlashController(wiring.Component):
                 with m.If(self.spi_bus.o_octets.ready):
                     m.next = "Wait"
 
+            # Raw IO mode
+            with m.State("Raw-Wait"):  
+                m.d.comb += self.spi_bus.o_octets.p.chip.eq(1)
+                m.d.comb += self.spi_bus.o_octets.p.mode.eq(QSPIMode.Swap)
+                m.d.comb += self.spi_bus.o_octets.p.data.eq(self._raw_tx_data.f.data.data)
+
+                with m.If(self._config.f.raw_enable.data):
+                    # Back to Wishbone mode, but make sure to deselect chip first
+                    m.next = "SPI-Deselect"
+                with m.Elif(self._raw_control.f.deselect.w_stb & self._raw_control.f.deselect.w_data):
+                    m.next = "Raw-Deselect"
+                with m.Elif(self._raw_tx_data.f.data.w_stb):
+                    m.d.comb += self.spi_bus.o_octets.valid.eq(1)
+                    with m.If(self.spi_bus.o_octets.ready):
+                        m.next = "Raw-Data-Read"
+
+            with m.State("Raw-Data-Read"):
+                m.d.comb += self.spi_bus.i_octets.ready.eq(1)
+                with m.If(self.spi_bus.i_octets.valid):
+                    m.d.sync += raw_rx_data.eq(self.spi_bus.i_octets.p.data)
+                    m.next = "Raw-Wait"
+
+            with m.State("Raw-Deselect"):
+                m.d.sync += self.wb_bus.ack.eq(0)
+                m.d.comb += self.spi_bus.o_octets.p.chip.eq(0)
+                m.d.comb += self.spi_bus.o_octets.p.mode.eq(QSPIMode.Dummy)
+                m.d.comb += self.spi_bus.o_octets.valid.eq(1)
+                with m.If(self.spi_bus.o_octets.ready):
+                    m.next = "Raw-Wait"
+
+            m.d.comb += self._raw_rx_data.f.data.r_data.eq(raw_rx_data)
+            m.d.comb += self._raw_control.f.ready.r_data.eq(fsm.ongoing("Raw-Wait"))
         return m
