@@ -54,9 +54,9 @@ class _RawTxDataField(csr.FieldAction):
 class WishboneQSPIFlashController(wiring.Component):
 
     class Config(csr.Register, access="rw"):
-        raw_enable:  csr.Field(csr.action.RW, 1)
-        width:       csr.Field(csr.action.RW, QSPIFlashWidth)
-        dummy_bits:  csr.Field(csr.action.RW, 4)
+        raw_enable:   csr.Field(csr.action.RW, 1)
+        width:        csr.Field(csr.action.RW, QSPIFlashWidth)
+        dummy_bytes:  csr.Field(csr.action.RW, 2)
 
     class RawControl(csr.Register, access="rw"):
         ready: csr.Field(csr.action.R, 1)
@@ -112,6 +112,7 @@ class WishboneQSPIFlashController(wiring.Component):
 
 
         o_addr_count = Signal(range(3))
+        o_dummy_count = Signal(range(4))
         o_data_count = Signal(range(wb_data_octets + 1))
         i_data_count = Signal(range(wb_data_octets + 1))
 
@@ -120,12 +121,34 @@ class WishboneQSPIFlashController(wiring.Component):
         raw_tx_data = Signal(8)
         raw_rx_data = Signal(8)
 
+        o_command = Signal(QSPIFlashCommand, init=QSPIFlashCommand.Read)
+        o_mode = Signal(QSPIMode, init=QSPIMode.PutX1)
+        i_mode = Signal(QSPIMode, init=QSPIMode.GetX1)
+
+        with m.Switch(self._config.f.width.data):
+            with m.Case(QSPIFlashWidth.X1):
+                m.d.comb += o_command.eq(QSPIFlashCommand.Read)
+                m.d.comb += o_mode.eq(QSPIMode.PutX1)
+                m.d.comb += i_mode.eq(QSPIMode.GetX1)
+            with m.Case(QSPIFlashWidth.X1Fast):
+                m.d.comb += o_command.eq(QSPIFlashCommand.FastRead)
+                m.d.comb += o_mode.eq(QSPIMode.PutX1)
+                m.d.comb += i_mode.eq(QSPIMode.GetX1)
+            with m.Case(QSPIFlashWidth.X2):
+                m.d.comb += o_command.eq(QSPIFlashCommand.FastReadDualInOut)
+                m.d.comb += o_mode.eq(QSPIMode.PutX2)
+                m.d.comb += i_mode.eq(QSPIMode.GetX2)
+            with m.Case(QSPIFlashWidth.X4):
+                m.d.comb += o_command.eq(QSPIFlashCommand.FastReadQuadInOut)
+                m.d.comb += o_mode.eq(QSPIMode.PutX4)
+                m.d.comb += i_mode.eq(QSPIMode.GetX4)
+
         with m.FSM() as fsm:
             # WB Memory-mapped mode
             with m.State("Wait"):
                 m.d.comb += self.spi_bus.o_octets.p.chip.eq(1)
                 m.d.comb += self.spi_bus.o_octets.p.mode.eq(QSPIMode.PutX1)
-                m.d.comb += self.spi_bus.o_octets.p.data.eq(QSPIFlashCommand.Read)
+                m.d.comb += self.spi_bus.o_octets.p.data.eq(o_command)
                 with m.If(self._config.f.raw_enable.data):
                     m.next = "Raw-Wait"
                 with m.Elif(self.wb_bus.cyc & self.wb_bus.stb & ~self.wb_bus.we):
@@ -136,18 +159,33 @@ class WishboneQSPIFlashController(wiring.Component):
 
             with m.State("SPI-Address"):
                 m.d.comb += self.spi_bus.o_octets.p.chip.eq(1)
-                m.d.comb += self.spi_bus.o_octets.p.mode.eq(QSPIMode.PutX1)
+                m.d.comb += self.spi_bus.o_octets.p.mode.eq(o_mode)
                 m.d.comb += self.spi_bus.o_octets.p.data.eq(flash_addr.word_select(o_addr_count, 8))
                 m.d.comb += self.spi_bus.o_octets.valid.eq(1)
                 with m.If(self.spi_bus.o_octets.ready):
                     with m.If(o_addr_count != 0):
                         m.d.sync += o_addr_count.eq(o_addr_count - 1)
+                    with m.Elif(self._config.f.dummy_bytes.data != 0):
+                        m.d.sync += o_dummy_count.eq(self._config.f.dummy_bytes.data - 1)
+                        m.next = "SPI-Dummy-Bytes"
                     with m.Else():
                         m.next = "SPI-Data-Read"
 
+            with m.State("SPI-Dummy-Bytes"):
+                m.d.comb += self.spi_bus.o_octets.p.chip.eq(1)
+                m.d.comb += self.spi_bus.o_octets.p.mode.eq(o_mode)
+                m.d.comb += self.spi_bus.o_octets.p.data.eq(0xFF)
+                m.d.comb += self.spi_bus.o_octets.valid.eq(1)
+                with m.If(self.spi_bus.o_octets.ready):
+                    with m.If(o_dummy_count != 0):
+                        m.d.sync += o_dummy_count.eq(o_dummy_count - 1)
+                    with m.Else():
+                        m.next = "SPI-Data-Read"
+
+
             with m.State("SPI-Data-Read"):
                 m.d.comb += self.spi_bus.o_octets.p.chip.eq(1)
-                m.d.comb += self.spi_bus.o_octets.p.mode.eq(QSPIMode.GetX1)
+                m.d.comb += self.spi_bus.o_octets.p.mode.eq(i_mode)
                 with m.If(o_data_count != wb_data_octets):
                     m.d.comb += self.spi_bus.o_octets.valid.eq(1)
                     with m.If(self.spi_bus.o_octets.ready):
