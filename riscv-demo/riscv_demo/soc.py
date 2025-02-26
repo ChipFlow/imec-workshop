@@ -60,6 +60,7 @@ class DemoSoC(wiring.Component):
         m.submodules.qspi = qspi
         m.submodules.spiflash = spiflash
 
+        csr_decoder.add(spiflash.csr_bus, name="spiflash", addr=self.csr_spiflash_base - self.csr_base)
         wb_decoder.add(spiflash.wb_bus, name="spiflash", addr=self.mem_spiflash_base)
 
         connect(m, spiflash.spi_bus, qspi)
