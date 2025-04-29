@@ -32,5 +32,7 @@ test = [
 [tool.pdm.scripts]
 _.env_file = ".env.toolchain"
 test.cmd = "pytest"
+submit.cmd = "chipflow silicon submit"
 pre_install = "git config --global core.longpaths true"
+
 
